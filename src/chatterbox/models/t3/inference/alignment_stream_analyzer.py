@@ -64,15 +64,31 @@ class AlignmentStreamAnalyzer:
         (credit: jrm)
         """
 
+#        def attention_forward_hook(module, input, output):
+#            """
+#            See `LlamaAttention.forward`; the output is a 3-tuple: `attn_output, attn_weights, past_key_value`.
+#            NOTE:
+#            - When `output_attentions=True`, `LlamaSdpaAttention.forward` calls `LlamaAttention.forward`.
+#            - `attn_output` has shape [B, H, T0, T0] for the 0th entry, and [B, H, 1, T0+i] for the rest i-th.
+#            """
+#            step_attention = output[1].cpu() # (B, 16, N, N)
+#            self.last_aligned_attn = step_attention[0].mean(0) # (N, N)
+
         def attention_forward_hook(module, input, output):
             """
             See `LlamaAttention.forward`; the output is a 3-tuple: `attn_output, attn_weights, past_key_value`.
             NOTE:
             - When `output_attentions=True`, `LlamaSdpaAttention.forward` calls `LlamaAttention.forward`.
             - `attn_output` has shape [B, H, T0, T0] for the 0th entry, and [B, H, 1, T0+i] for the rest i-th.
+            - With newer `transformers` versions using SDPA/optimized attention kernels, attn_weights
+              (output[1]) may come back as None even with output_attentions=True. Falls back to a
+              zero tensor in that case rather than crashing.
             """
-            step_attention = output[1].cpu() # (B, 16, N, N)
-            self.last_aligned_attn = step_attention[0].mean(0) # (N, N)
+            if output[1] is not None:
+                step_attention = output[1].cpu() # (B, 16, N, N)
+                self.last_aligned_attn = step_attention[0].mean(0) # (N, N)
+            elif self.last_aligned_attn is None:
+                self.last_aligned_attn = torch.zeros(1000, 1000)
 
         target_layer = tfmr.layers[alignment_layer_idx].self_attn
         hook_handle = target_layer.register_forward_hook(attention_forward_hook)
